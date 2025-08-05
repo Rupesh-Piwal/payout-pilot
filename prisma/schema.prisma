@@ -1,0 +1,147 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// User model (if you have authentication)
+model User {
+  id          String   @id @default(cuid())
+  clerkUserId String   @unique // From Clerk
+  email       String   @unique
+  name        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  payouts Payout[]
+
+  @@map("users")
+}
+
+// Main payout model
+model Payout {
+  id              String          @id @default(cuid())
+  recipientName   String
+  recipientEmail  String?
+  walletAddress   String
+  amount          Decimal         @db.Decimal(18, 8) // Supports crypto precision
+  currency        PayoutCurrency
+  frequency       PayoutFrequency
+  startDate       DateTime
+  endDate         DateTime?
+  description     String?
+  notifyRecipient Boolean         @default(false)
+  autoRetry       Boolean         @default(false)
+  status          PayoutStatus    @default(SCHEDULED)
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  userId       String?
+  user         User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedules    PayoutSchedule[]
+  transactions PayoutTransaction[]
+
+  @@map("payouts")
+}
+
+// Schedule entries for recurring payouts
+model PayoutSchedule {
+  id            String               @id @default(cuid())
+  payoutId      String
+  scheduledDate DateTime
+  executedDate  DateTime?
+  status        PayoutScheduleStatus @default(PENDING)
+  failureReason String?
+  retryCount    Int                  @default(0)
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  payout      Payout             @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  transaction PayoutTransaction?
+
+  @@map("payout_schedules")
+}
+
+// Transaction records for completed/attempted payouts
+model PayoutTransaction {
+  id              String                  @id @default(cuid())
+  payoutId        String
+  scheduleId      String?                 @unique
+  amount          Decimal                 @db.Decimal(18, 8)
+  currency        PayoutCurrency
+  status          PayoutTransactionStatus
+  transactionHash String? // For blockchain transactions
+  externalId      String? // External payment processor ID
+  failureReason   String?
+  processingFee   Decimal?                @db.Decimal(18, 8)
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  payout   Payout          @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  schedule PayoutSchedule? @relation(fields: [scheduleId], references: [id])
+
+  @@map("payout_transactions")
+}
+
+// Enums
+enum PayoutCurrency {
+  USD
+  EUR
+  GBP
+  BTC
+  ETH
+  USDC
+}
+
+enum PayoutFrequency {
+  ONE_TIME  @map("one-time")
+  WEEKLY    @map("weekly")
+  MONTHLY   @map("monthly")
+  QUARTERLY @map("quarterly")
+}
+
+enum PayoutStatus {
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum PayoutScheduleStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum PayoutTransactionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
