@@ -1,5 +1,6 @@
 "use server";
 
+import { Decimal } from "@/generated/prisma/runtime/library";
 import { prisma } from "@/lib/prisma"; // Adjust path to your Prisma client
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -102,7 +103,7 @@ export async function createPayout(formData: FormData) {
     }
 
     // Revalidate relevant pages
- 
+
     revalidatePath("/dashboard");
 
     return {
@@ -174,7 +175,7 @@ export async function createPayoutFromObject(data: PayoutFormData) {
     }
 
     // Revalidate relevant pages
-    
+
     revalidatePath("/dashboard");
 
     return {
@@ -264,6 +265,7 @@ export async function getPayouts(userId?: string) {
       },
       orderBy: { createdAt: "desc" },
     });
+    console.log("-----PAYOUTS-----", payouts);
 
     return {
       success: true,
@@ -331,6 +333,269 @@ export async function deletePayout(payoutId: string) {
     return {
       success: false,
       error: "Failed to delete payout",
+    };
+  }
+}
+
+export async function getPayoutStats(userId?: string) {
+  try {
+    const whereClause = userId ? { userId } : {};
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [
+      totalScheduled,
+      totalActive,
+      totalCompleted,
+      totalFailed,
+      totalAmount,
+      totalVolumeAgg,
+      thisMonthVolumeAgg,
+      upcomingPayouts,
+      recentTransactions,
+    ] = await Promise.all([
+      prisma.payout.count({
+        where: {
+          ...whereClause,
+          status: "SCHEDULED",
+        },
+      }),
+
+      prisma.payout.count({
+        where: {
+          ...whereClause,
+          status: "ACTIVE",
+        },
+      }),
+
+      prisma.payout.count({
+        where: {
+          ...whereClause,
+          status: "COMPLETED",
+        },
+      }),
+
+      prisma.payout.count({
+        where: {
+          ...whereClause,
+          status: "FAILED",
+        },
+      }),
+
+      prisma.payout.aggregate({
+        where: {
+          ...whereClause,
+          status: {
+            in: ["SCHEDULED", "ACTIVE"],
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+
+      // Total volume (all completed payouts)
+      prisma.payout.aggregate({
+        where: {
+          ...whereClause,
+          status: "COMPLETED",
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+
+      // This month's volume
+      prisma.payout.aggregate({
+        where: {
+          ...whereClause,
+          status: "COMPLETED",
+          createdAt: {
+            gte: startOfMonth,
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+
+      prisma.payoutSchedule.findMany({
+        where: {
+          payout: whereClause,
+          status: "PENDING",
+          scheduledDate: {
+            gte: now,
+            lte: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+          },
+        },
+        include: {
+          payout: {
+            select: {
+              recipientName: true,
+              amount: true,
+              currency: true,
+            },
+          },
+        },
+        orderBy: {
+          scheduledDate: "asc",
+        },
+        take: 10,
+      }),
+
+      prisma.payoutTransaction.findMany({
+        where: {
+          payout: whereClause,
+        },
+        include: {
+          payout: {
+            select: {
+              recipientName: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 10,
+      }),
+    ]);
+
+    const pendingSchedules = await prisma.payoutSchedule.count({
+      where: {
+        payout: whereClause,
+        status: "PENDING",
+        scheduledDate: {
+          gte: now,
+        },
+      },
+    });
+
+    const totalVolume = totalVolumeAgg._sum.amount ?? new Decimal(0);
+    const thisMonth = thisMonthVolumeAgg._sum.amount ?? new Decimal(0);
+
+    const growth =
+      totalVolume.gt(0) && thisMonth.gt(0)
+        ? Math.round(thisMonth.div(totalVolume).toNumber() * 100)
+        : 0;
+
+   return {
+  success: true,
+  data: {
+    totalScheduled: totalScheduled + totalActive,
+    totalActive,
+    totalCompleted,
+    totalFailed,
+    totalAmount: totalAmount._sum.amount?.toNumber() ?? 0,
+    pendingSchedules,
+
+    upcomingPayouts: upcomingPayouts.map((item) => ({
+      id: item.id,
+      scheduledDate: item.scheduledDate.toISOString(),
+      payout: {
+        recipientName: item.payout.recipientName,
+        amount: item.payout.amount.toNumber(),
+        currency: item.payout.currency,
+      },
+    })),
+
+    recentTransactions: recentTransactions.map((tx) => ({
+      id: tx.id,
+      status: tx.status,
+      amount: tx.amount.toNumber(),
+      currency: tx.currency,
+      createdAt: tx.createdAt.toISOString(),
+      payout: {
+        recipientName: tx.payout.recipientName,
+      },
+    })),
+
+    totalVolume: totalVolume.toNumber(),
+    thisMonth: thisMonth.toNumber(),
+    growth,
+
+    summary: {
+      totalPayouts:
+        totalScheduled + totalActive + totalCompleted + totalFailed,
+      activePayouts: totalScheduled + totalActive,
+      successRate:
+        totalCompleted + totalFailed > 0
+          ? Math.round(
+              (totalCompleted / (totalCompleted + totalFailed)) * 100
+            )
+          : 0,
+    },
+  },
+};
+
+  } catch (error) {
+    console.error("Error fetching payout stats:", error);
+    return {
+      success: false,
+      error: "Failed to fetch payout statistics",
+    };
+  }
+}
+
+// Get detailed breakdown of scheduled payouts
+export async function getScheduledPayoutsBreakdown(userId?: string) {
+  try {
+    const whereClause = userId ? { userId } : {};
+
+    const scheduledBreakdown = await prisma.payout.groupBy({
+      by: ["frequency", "currency"],
+      where: {
+        ...whereClause,
+        status: {
+          in: ["SCHEDULED", "ACTIVE"],
+        },
+      },
+      _count: {
+        id: true,
+      },
+      _sum: {
+        amount: true,
+      },
+    });
+
+    // Get next execution dates for active payouts
+    const nextExecutions = await prisma.payoutSchedule.findMany({
+      where: {
+        payout: whereClause,
+        status: "PENDING",
+        scheduledDate: {
+          gte: new Date(),
+        },
+      },
+      include: {
+        payout: {
+          select: {
+            recipientName: true,
+            amount: true,
+            currency: true,
+            frequency: true,
+          },
+        },
+      },
+      orderBy: {
+        scheduledDate: "asc",
+      },
+      take: 20,
+    });
+
+    return {
+      success: true,
+      data: {
+        breakdown: scheduledBreakdown,
+        nextExecutions,
+      },
+    };
+  } catch (error) {
+    console.error("Error fetching scheduled payouts breakdown:", error);
+    return {
+      success: false,
+      error: "Failed to fetch breakdown",
     };
   }
 }
