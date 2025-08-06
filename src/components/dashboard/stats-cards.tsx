@@ -54,7 +54,7 @@ export function StatsCards() {
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">
-            {/* {stats.totalScheduled.toLocaleString()} */}
+            {stats?.totalScheduled}
           </div>
           <p className="text-xs text-muted-foreground">Active payouts</p>
         </CardContent>
