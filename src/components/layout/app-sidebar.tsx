@@ -1,8 +1,16 @@
-"use client"
+"use client";
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { History, Home, Send, Settings, TrendingUp, Users, Wallet } from "lucide-react"
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  History,
+  Home,
+  Send,
+  Settings,
+  TrendingUp,
+  Users,
+  Wallet,
+} from "lucide-react";
 
 import {
   Sidebar,
@@ -11,7 +19,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar"
+} from "@/components/ui/sidebar";
 
 const navigationItems = [
   {
@@ -44,10 +52,10 @@ const navigationItems = [
     url: "/settings",
     icon: Settings,
   },
-]
+];
 
 export function AppSidebar() {
-  const pathname = usePathname()
+  const pathname = usePathname();
 
   return (
     <Sidebar>
@@ -63,7 +71,7 @@ export function AppSidebar() {
               </div>
               <div className="flex flex-col gap-0.5 leading-none">
                 <span className="font-semibold">PayoutPilot</span>
-                <span className="text-xs text-muted-foreground">Payout Manager</span>
+                <span className="text-xs text-slate-600">Payout Manager</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -84,5 +92,5 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarContent>
     </Sidebar>
-  )
+  );
 }
